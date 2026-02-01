@@ -30,6 +30,11 @@ jobs:
       - name: Copy Capacitor assets
         run: npx cap copy android
 
+      - name: Fix Java version in capacitor.build.gradle
+        run: |
+          sed -i 's/JavaVersion.VERSION_21/JavaVersion.VERSION_17/g' android/app/capacitor.build.gradle
+          cat android/app/capacitor.build.gradle
+
       - name: Build Android Debug APK
         run: |
           cd android
