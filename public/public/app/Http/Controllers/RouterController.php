@@ -508,6 +508,97 @@ class RouterController extends Controller
     }
     
     /**
+     * Open/sync WinBox port forwarding on the server
+     */
+    public function openPort(Router $router)
+    {
+        $this->authorize('update', $router);
+        
+        if (!$router->wg_client_ip || !$router->public_port) {
+            return response()->json([
+                'success' => false,
+                'message' => 'يجب تعيين WireGuard IP و بورت WinBox أولاً',
+            ], 422);
+        }
+        
+        try {
+            $port = (int) $router->public_port;
+            $ip = $router->wg_client_ip;
+            
+            // Check if rule already exists
+            exec("sudo /usr/sbin/iptables -t nat -L PREROUTING -n 2>/dev/null | grep 'dpt:{$port}'", $checkOutput);
+            $ruleExists = !empty($checkOutput);
+            
+            if ($ruleExists) {
+                // Remove old rule first (in case target changed)
+                exec("sudo /usr/sbin/iptables -t nat -D PREROUTING -p tcp --dport {$port} -j DNAT --to-destination {$ip}:8291 2>/dev/null");
+                exec("sudo /usr/sbin/iptables -t nat -D POSTROUTING -p tcp -d {$ip} --dport 8291 -j MASQUERADE 2>/dev/null");
+            }
+            
+            // Add DNAT rule: external_port -> router_wg_ip:8291
+            $dnatCmd = "sudo /usr/sbin/iptables -t nat -A PREROUTING -p tcp --dport {$port} -j DNAT --to-destination {$ip}:8291 2>&1";
+            exec($dnatCmd, $dnatOutput, $dnatReturn);
+            
+            if ($dnatReturn !== 0) {
+                throw new Exception('فشل إضافة قاعدة DNAT: ' . implode(' ', $dnatOutput));
+            }
+            
+            // Add MASQUERADE rule
+            $masqCmd = "sudo /usr/sbin/iptables -t nat -A POSTROUTING -p tcp -d {$ip} --dport 8291 -j MASQUERADE 2>&1";
+            exec($masqCmd, $masqOutput, $masqReturn);
+            
+            if ($masqReturn !== 0) {
+                throw new Exception('فشل إضافة قاعدة MASQUERADE: ' . implode(' ', $masqOutput));
+            }
+            
+            // Add FORWARD rule
+            exec("sudo /usr/sbin/iptables -C FORWARD -p tcp -d {$ip} --dport 8291 -j ACCEPT 2>/dev/null", $fwdCheck, $fwdCheckReturn);
+            if ($fwdCheckReturn !== 0) {
+                exec("sudo /usr/sbin/iptables -A FORWARD -p tcp -d {$ip} --dport 8291 -j ACCEPT 2>/dev/null");
+            }
+            
+            // Save rules for persistence
+            exec('sudo /usr/sbin/iptables-save | sudo tee /etc/iptables/rules.v4 > /dev/null 2>&1');
+            
+            \Illuminate\Support\Facades\Log::info("Port forwarding opened for router {$router->id}: port {$port} -> {$ip}:8291");
+            ActivityLog::log('router.port_opened', "فتح بورت WinBox {$port} للراوتر: {$router->name}", null, $router->id);
+            
+            return response()->json([
+                'success' => true,
+                'message' => "تم فتح البورت {$port} بنجاح! يمكنك الآن الدخول عبر WinBox على {$router->public_ip}:{$port}",
+                'winbox_address' => "{$router->public_ip}:{$port}",
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'فشل فتح البورت: ' . $e->getMessage(),
+            ], 422);
+        }
+    }
+    
+    /**
+     * Check if WinBox port is open on the server
+     */
+    public function checkPort(Router $router)
+    {
+        $this->authorize('view', $router);
+        
+        if (!$router->public_port) {
+            return response()->json(['open' => false, 'message' => 'لم يتم تعيين بورت WinBox']);
+        }
+        
+        $port = (int) $router->public_port;
+        exec("sudo /usr/sbin/iptables -t nat -L PREROUTING -n 2>/dev/null | grep 'dpt:{$port}'", $output);
+        
+        return response()->json([
+            'open' => !empty($output),
+            'port' => $port,
+            'address' => "{$router->public_ip}:{$port}",
+            'message' => !empty($output) ? 'البورت مفتوح' : 'البورت مغلق',
+        ]);
+    }
+
+    /**
      * Save WireGuard public key from router
      */
     public function saveWireGuardPublicKey(Request $request, Router $router)
