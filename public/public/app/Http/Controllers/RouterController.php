@@ -62,6 +62,34 @@ class RouterController extends Controller
     }
 
     /**
+     * Get the next available WinBox port
+     */
+    private function getNextAvailablePort(): int
+    {
+        $basePort = 8291;
+        $maxPort = Router::max('public_port');
+        
+        if (!$maxPort || $maxPort < $basePort) {
+            return $basePort;
+        }
+        
+        // Find first gap in used ports
+        $usedPorts = Router::whereNotNull('public_port')
+            ->pluck('public_port')
+            ->sort()
+            ->values()
+            ->toArray();
+        
+        for ($port = $basePort; $port <= $maxPort + 1; $port++) {
+            if (!in_array($port, $usedPorts)) {
+                return $port;
+            }
+        }
+        
+        return $maxPort + 1;
+    }
+
+    /**
      * Show the form for creating a new router
      */
     public function create()
@@ -71,7 +99,10 @@ class RouterController extends Controller
         // Get next available IP for WireGuard
         $nextWgIP = $this->wgService->getNextAvailableIP();
         
-        return view('routers.create', compact('nextWgIP'));
+        // Get next available WinBox port
+        $nextPort = $this->getNextAvailablePort();
+        
+        return view('routers.create', compact('nextWgIP', 'nextPort'));
     }
 
     /**
@@ -98,6 +129,11 @@ class RouterController extends Controller
         ]);
 
         $validated['wg_enabled'] = $request->boolean('wg_enabled');
+        
+        // تعيين البورت تلقائياً إذا لم يتم إدخاله
+        if (empty($validated['public_port'])) {
+            $validated['public_port'] = $this->getNextAvailablePort();
+        }
         
         // إذا كان WireGuard مفعل، استخدم wg_client_ip كـ ip_address للاتصال
         if ($validated['wg_enabled'] && !empty($validated['wg_client_ip'])) {
