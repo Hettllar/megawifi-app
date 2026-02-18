@@ -66,15 +66,16 @@ class RouterController extends Controller
      */
     private function getNextAvailablePort(): int
     {
-        $basePort = 8291;
+        $basePort = 8310;
         $maxPort = Router::max('public_port');
         
         if (!$maxPort || $maxPort < $basePort) {
             return $basePort;
         }
         
-        // Find first gap in used ports
+        // Find first gap in used ports starting from 8310
         $usedPorts = Router::whereNotNull('public_port')
+            ->where('public_port', '>=', $basePort)
             ->pluck('public_port')
             ->sort()
             ->values()
