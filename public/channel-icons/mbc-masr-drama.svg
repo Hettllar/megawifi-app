@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a0533"/>
+      <stop offset="100%" style="stop-color:#2d1b69"/>
+    </linearGradient>
+    <linearGradient id="mbc" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00bcd4"/>
+      <stop offset="100%" style="stop-color:#26c6da"/>
+    </linearGradient>
+    <linearGradient id="masr" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ef5350"/>
+      <stop offset="100%" style="stop-color:#ef9a9a"/>
+    </linearGradient>
+    <linearGradient id="drama" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e040fb"/>
+      <stop offset="100%" style="stop-color:#ea80fc"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow3d">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#ef5350" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+  <rect width="200" height="200" rx="40" fill="url(#bg)"/>
+  <rect x="6" y="6" width="188" height="188" rx="38" fill="none" stroke="url(#masr)" stroke-width="1.5" opacity="0.25"/>
+  <!-- MBC text -->
+  <text x="100" y="70" text-anchor="middle" font-family="Arial Black, sans-serif" font-size="40" font-weight="900" fill="url(#mbc)" filter="url(#glow)">MBC</text>
+  <!-- MASR text -->
+  <text x="100" y="108" text-anchor="middle" font-family="Arial Black, sans-serif" font-size="32" font-weight="900" fill="url(#masr)" filter="url(#shadow3d)">MASR</text>
+  <!-- DRAMA text -->
+  <text x="100" y="140" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="url(#drama)" letter-spacing="4">DRAMA</text>
+  <!-- Egyptian flag colors bar -->
+  <rect x="50" y="158" width="100" height="5" rx="2.5" fill="#ce1126"/>
+  <rect x="50" y="166" width="100" height="5" rx="2.5" fill="white"/>
+  <rect x="50" y="174" width="100" height="5" rx="2.5" fill="#000"/>
+</svg>

@@ -1,0 +1,92 @@
+services:
+  megawifi-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: megawifi-app
+    restart: unless-stopped
+    volumes:
+      - /opt/megawifi/storage:/var/www/megawifi/storage
+      - /opt/megawifi/iptables-cmd:/opt/megawifi/iptables-cmd
+      - /opt/megawifi/iptables-result:/opt/megawifi/iptables-result
+      - /opt/megawifi/wg-cmd:/opt/megawifi/wg-cmd
+      - /opt/megawifi/wg-result:/opt/megawifi/wg-result
+    env_file:
+      - .env
+    depends_on:
+      megawifi-db:
+        condition: service_healthy
+      megawifi-redis:
+        condition: service_started
+    networks:
+      - megawifi-net
+
+  megawifi-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: megawifi-worker
+    restart: unless-stopped
+    command: php artisan queue:work --sleep=3 --tries=3 --timeout=600 --max-time=3600
+    volumes:
+      - /opt/megawifi/storage:/var/www/megawifi/storage
+      - /opt/megawifi/iptables-cmd:/opt/megawifi/iptables-cmd
+      - /opt/megawifi/iptables-result:/opt/megawifi/iptables-result
+      - /opt/megawifi/wg-cmd:/opt/megawifi/wg-cmd
+      - /opt/megawifi/wg-result:/opt/megawifi/wg-result
+    env_file:
+      - .env
+    depends_on:
+      megawifi-db:
+        condition: service_healthy
+      megawifi-redis:
+        condition: service_started
+    networks:
+      - megawifi-net
+
+  megawifi-nginx:
+    image: nginx:alpine
+    container_name: megawifi-nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /opt/megawifi/public:/var/www/megawifi/public:ro
+      - /opt/megawifi/storage:/var/www/megawifi/storage:ro
+      - /opt/megawifi/iptables-cmd:/opt/megawifi/iptables-cmd
+      - /opt/megawifi/iptables-result:/opt/megawifi/iptables-result
+    depends_on:
+      - megawifi-app
+    networks:
+      - megawifi-net
+
+  megawifi-db:
+    image: mariadb:11
+    container_name: megawifi-db
+    restart: unless-stopped
+    env_file:
+      - .env.db
+    volumes:
+      - /data/megawifi/mysql:/var/lib/mysql
+      - /opt/megawifi/megawifi.sql:/docker-entrypoint-initdb.d/megawifi.sql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - megawifi-net
+
+  megawifi-redis:
+    image: redis:7-alpine
+    container_name: megawifi-redis
+    restart: unless-stopped
+    volumes:
+      - /data/megawifi/redis:/data
+    networks:
+      - megawifi-net
+
+networks:
+  megawifi-net:
+    driver: bridge

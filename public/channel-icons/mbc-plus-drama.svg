@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a0533"/>
+      <stop offset="100%" style="stop-color:#2d1b69"/>
+    </linearGradient>
+    <linearGradient id="mbc" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00bcd4"/>
+      <stop offset="100%" style="stop-color:#26c6da"/>
+    </linearGradient>
+    <linearGradient id="plus" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff9800"/>
+      <stop offset="100%" style="stop-color:#ffb74d"/>
+    </linearGradient>
+    <linearGradient id="drama" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e040fb"/>
+      <stop offset="100%" style="stop-color:#ea80fc"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow3d">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#ff9800" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+  <rect width="200" height="200" rx="40" fill="url(#bg)"/>
+  <rect x="6" y="6" width="188" height="188" rx="38" fill="none" stroke="url(#plus)" stroke-width="1.5" opacity="0.25"/>
+  <!-- MBC+ text -->
+  <text x="100" y="85" text-anchor="middle" font-family="Arial Black, sans-serif" font-size="44" font-weight="900" fill="url(#mbc)" filter="url(#glow)">MBC</text>
+  <text x="165" y="70" text-anchor="middle" font-family="Arial Black, sans-serif" font-size="36" font-weight="900" fill="url(#plus)" filter="url(#shadow3d)">+</text>
+  <!-- DRAMA text -->
+  <text x="100" y="120" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="url(#drama)" letter-spacing="5">DRAMA</text>
+  <!-- Star decorations -->
+  <polygon points="40,155 43,165 53,165 45,171 48,181 40,175 32,181 35,171 27,165 37,165" fill="url(#plus)" opacity="0.5"/>
+  <polygon points="100,150 103,160 113,160 105,166 108,176 100,170 92,176 95,166 87,160 97,160" fill="url(#plus)" opacity="0.5"/>
+  <polygon points="160,155 163,165 173,165 165,171 168,181 160,175 152,181 155,171 147,165 157,165" fill="url(#plus)" opacity="0.5"/>
+</svg>

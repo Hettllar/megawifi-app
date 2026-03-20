@@ -1,0 +1,26 @@
+                // Add payment info if provided (allow 0 values)
+                if ($request->has('subscription_price') && $request->input('subscription_price') !== null) {
+                    $updateData['subscription_price'] = (float) $request->input('subscription_price');
+                }
+                if ($request->has('remaining_amount') && $request->input('remaining_amount') !== null) {
+                    $updateData['remaining_amount'] = (float) $request->input('remaining_amount');
+                }
+                
+                // Handle is_paid - check multiple formats
+                if ($request->has('is_paid')) {
+                    $isPaidValue = $request->input('is_paid');
+                    // Handle both boolean and string representations
+                    $updateData['is_paid'] = filter_var($isPaidValue, FILTER_VALIDATE_BOOLEAN);
+                }
+                
+                Log::info("Updating subscriber {$subscriber->id} with data: ", $updateData);
+                
+                $subscriber->update($updateData);
+
+                // Reset local usage if requested
+                if ($request->boolean('reset_usage')) {
+                    $subscriber->update([
+                        'bytes_in' => 0,
+                        'bytes_out' => 0,
+                        'total_bytes' => 0,
+                        'uptime_used' => 0,

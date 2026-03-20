@@ -1,0 +1,40 @@
+
+    public function routerNeighbors(Request \, \)
+    {
+        \ = \->user(\);
+        \ = \->routerIds(\);
+
+        if (!in_array(\, \)) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        \ = Router::find(\);
+        if (!\) {
+            return response()->json(['success' => false, 'message' => 'Router not found'], 404);
+        }
+
+        try {
+            \ = new \App\Services\MikroTikService(\);
+            \ = \->command(['/ip/neighbor/print']);
+
+            \ = [];
+            foreach (\ as \) {
+                \[] = [
+                    'identity' => \['identity'] ?? '',
+                    'address' => \['address'] ?? '',
+                    'address4' => \['address4'] ?? (\['address'] ?? ''),
+                    'mac_address' => \['mac-address'] ?? '',
+                    'interface' => \['interface'] ?? '',
+                    'platform' => \['platform'] ?? '',
+                    'board' => \['board'] ?? '',
+                    'version' => \['version'] ?? '',
+                    'uptime' => \['uptime'] ?? '',
+                    'system_description' => \['system-description'] ?? '',
+                ];
+            }
+
+            return response()->json(['success' => true, 'neighbors' => \, 'router_name' => \->name]);
+        } catch (\Exception \) {
+            return response()->json(['success' => false, 'message' => \->getMessage()], 500);
+        }
+    }

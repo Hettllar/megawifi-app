@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang=" ar\ dir=\rtl\>
+<head>
+ <meta charset=\UTF-8\>
+ <meta name=\viewport\ content=\width=device-width initial-scale=1.0\>
+ <meta name=\theme-color\ content=\#991b1b\>
+ <title>اختبار تطبيق MegaWiFi PWA</title>
+ <link rel=\manifest\ href=\/manifest.json\>
+ <link rel=\icon\ href=\/favicon.ico\>
+ <link rel=\apple-touch-icon\ href=\/icons/icon-192.png\>
+ <script src=\https://cdn.tailwindcss.com\></script>
+ <link href=\https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css\ rel=\stylesheet\>
+</head>
+<body class=\bg-gray-900 text-white min-h-screen\>
+ <div class=\container mx-auto p-6\>
+ <div class=\text-center mb-8\>
+ <i class=\fas fa-wifi text-6xl text-blue-400 mb-4\></i>
+ <h1 class=\text-4xl font-bold mb-2\>MegaWiFi PWA</h1>
+ <p class=\text-gray-400\>اختبار تطبيق الجوال</p>
+ </div>
+ 
+ <div class=\grid gap-4 max-w-md mx-auto\>
+ <div class=\bg-gray-800 p-4 rounded-lg\>
+ <h3 class=\font-bold mb-2\> حالة PWA</h3>
+ <p id=\pwaStatus\ class=\text-red-400\>جاري التحقق...</p>
+ </div>
+ 
+ <div class=\bg-gray-800 p-4 rounded-lg\>
+ <h3 class=\font-bold mb-2\> Service Worker</h3>
+ <p id=\swStatus\ class=\text-red-400\>جاري التحقق...</p>
+ </div>
+ 
+ <div class=\bg-gray-800 p-4 rounded-lg\>
+ <h3 class=\font-bold mb-2\> زر التثبيت</h3>
+ <button id=\installBtn\ class=\bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-white hidden\>
+ تثبيت التطبيق
+ </button>
+ <p id=\installStatus\ class=\text-gray-400\>جاري التحقق...</p>
+ </div>
+ </div>
+ 
+ <div class=\mt-8 text-center\>
+ <a href=\/dashboard\ class=\bg-green-600 hover:bg-green-700 px-6 py-3 rounded inline-block\>
+ <i class=\fas fa-home ml-2\></i>
+ الذهاب للوحة التحكم
+ </a>
+ </div>
+ </div>
+
+ <script>
+ // تحقق من دعم PWA
+ function checkPWASupport() {
+ const status = document.getElementById('pwaStatus');
+ if ('serviceWorker' in navigator && 'PushManager' in window) {
+ status.textContent = ' PWA مدعوم';
+ status.className = 'text-green-400';
+ } else {
+ status.textContent = ' PWA غير مدعوم';
+ status.className = 'text-red-400';
+ }
+ }
+ 
+ // تحقق من Service Worker
+ async function checkServiceWorker() {
+ const status = document.getElementById('swStatus');
+ if ('serviceWorker' in navigator) {
+ try {
+ const registration = await navigator.serviceWorker.register('/sw.js');
+ status.textContent = ' Service Worker يعمل';
+ status.className = 'text-green-400';
+ console.log('SW registered:', registration);
+ } catch (error) {
+ status.textContent = ' خطأ في Service Worker';
+ status.className = 'text-red-400';
+ console.error('SW registration failed:', error);
+ }
+ } else {
+ status.textContent = ' Service Worker غير مدعوم';
+ status.className = 'text-red-400';
+ }
+ }
+ 
+ // إعداد زر التثبيت
+ let deferredPrompt;
+ const installBtn = document.getElementById('installBtn');
+ const installStatus = document.getElementById('installStatus');
+ 
+ window.addEventListener('beforeinstallprompt', (e) => {
+ e.preventDefault();
+ deferredPrompt = e;
+ installBtn.classList.remove('hidden');
+ installStatus.textContent = 'يمكن تثبيت التطبيق';
+ installStatus.className = 'text-green-400';
+ });
+ 
+ installBtn.addEventListener('click', async () => {
+ if (deferredPrompt) {
+ deferredPrompt.prompt();
+ const { outcome } = await deferredPrompt.userChoice;
+ if (outcome === 'accepted') {
+ installStatus.textContent = ' تم التثبيت بنجاح';
+ } else {
+ installStatus.textContent = ' تم إلغاء التثبيت';
+ }
+ deferredPrompt = null;
+ }
+ });
+ 
+ // بدء الاختبارات
+ checkPWASupport();
+ checkServiceWorker();
+ </script>
+</body>
+</html>

@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- Main gradient - vibrant blue to deep indigo -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4f46e5"/>
+      <stop offset="50%" style="stop-color:#2563eb"/>
+      <stop offset="100%" style="stop-color:#0ea5e9"/>
+    </linearGradient>
+    <!-- Glass shine -->
+    <linearGradient id="shine" x1="0%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.45"/>
+      <stop offset="100%" style="stop-color:#ffffff;stop-opacity:0"/>
+    </linearGradient>
+    <!-- Wallet gradient -->
+    <linearGradient id="walletGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff"/>
+      <stop offset="100%" style="stop-color:#e0e7ff"/>
+    </linearGradient>
+    <!-- Gold coin gradient -->
+    <linearGradient id="coinGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#fbbf24"/>
+      <stop offset="40%" style="stop-color:#f59e0b"/>
+      <stop offset="100%" style="stop-color:#d97706"/>
+    </linearGradient>
+    <!-- Coin shine -->
+    <linearGradient id="coinShine" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" style="stop-color:#fde68a;stop-opacity:0.8"/>
+      <stop offset="100%" style="stop-color:#f59e0b;stop-opacity:0"/>
+    </linearGradient>
+    <!-- Card gradient -->
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+    <!-- 3D shadow -->
+    <filter id="shadow3d" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#1e1b4b" flood-opacity="0.4"/>
+    </filter>
+    <filter id="shadowSmall" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#1e1b4b" flood-opacity="0.35"/>
+    </filter>
+    <!-- Glow effect -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="coinGlow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect width="512" height="512" rx="108" ry="108" fill="url(#bgGrad)"/>
+
+  <!-- Ambient glow circles -->
+  <circle cx="140" cy="140" r="120" fill="#818cf8" opacity="0.15"/>
+  <circle cx="380" cy="380" r="100" fill="#06b6d4" opacity="0.12"/>
+
+  <!-- Glass shine overlay -->
+  <ellipse cx="200" cy="160" rx="220" ry="160" fill="url(#shine)" opacity="0.5"/>
+
+  <!-- Wallet body with 3D shadow -->
+  <g filter="url(#shadow3d)">
+    <rect x="72" y="168" width="310" height="210" rx="28" fill="url(#walletGrad)"/>
+  </g>
+
+  <!-- Wallet flap (3D raised) -->
+  <g filter="url(#shadowSmall)">
+    <path d="M72 210 Q72 148 120 148 L340 126 Q382 120 382 170 L382 210 Z" fill="white" opacity="0.95"/>
+  </g>
+
+  <!-- Wallet clasp -->
+  <rect x="330" y="192" width="50" height="36" rx="10" fill="url(#cardGrad)" opacity="0.9"/>
+  <rect x="340" y="202" width="30" height="16" rx="6" fill="white" opacity="0.3"/>
+
+  <!-- Credit card inside wallet -->
+  <g filter="url(#shadowSmall)" transform="rotate(-5, 200, 280)">
+    <rect x="110" y="230" width="180" height="110" rx="14" fill="url(#cardGrad)"/>
+    <!-- Card chip -->
+    <rect x="132" y="256" width="32" height="24" rx="5" fill="#fbbf24" opacity="0.8"/>
+    <line x1="136" y1="264" x2="160" y2="264" stroke="#d97706" stroke-width="1.5" opacity="0.5"/>
+    <line x1="136" y1="272" x2="160" y2="272" stroke="#d97706" stroke-width="1.5" opacity="0.5"/>
+    <!-- Card lines -->
+    <rect x="132" y="300" width="80" height="6" rx="3" fill="white" opacity="0.3"/>
+    <rect x="132" y="312" width="50" height="6" rx="3" fill="white" opacity="0.2"/>
+    <!-- WiFi symbol on card -->
+    <g transform="translate(250, 272)" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" opacity="0.5">
+      <path d="M-14 10 Q0 -6 14 10"/>
+      <path d="M-9 6 Q0 -1 9 6"/>
+      <circle cx="0" cy="12" r="2.5" fill="white" stroke="none"/>
+    </g>
+  </g>
+
+  <!-- Gold coin (3D effect) - main feature -->
+  <g filter="url(#coinGlow)" transform="translate(370, 310)">
+    <!-- Coin shadow -->
+    <ellipse cx="4" cy="8" rx="58" ry="58" fill="#92400e" opacity="0.3"/>
+    <!-- Coin edge (3D depth) -->
+    <circle cx="0" cy="4" r="56" fill="#b45309"/>
+    <!-- Coin face -->
+    <circle cx="0" cy="0" r="56" fill="url(#coinGrad)"/>
+    <!-- Coin inner ring -->
+    <circle cx="0" cy="0" r="46" fill="none" stroke="#fde68a" stroke-width="2.5" opacity="0.6"/>
+    <!-- $ symbol -->
+    <text x="0" y="18" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="56" font-weight="900" fill="#92400e" opacity="0.3">$</text>
+    <text x="0" y="16" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="56" font-weight="900" fill="#fffbeb">$</text>
+    <!-- Coin shine -->
+    <ellipse cx="-16" cy="-18" rx="24" ry="18" fill="url(#coinShine)" transform="rotate(-30, -16, -18)"/>
+  </g>
+
+  <!-- Small floating coins -->
+  <g opacity="0.7" filter="url(#shadowSmall)">
+    <!-- Small coin 1 -->
+    <circle cx="420" cy="180" r="22" fill="url(#coinGrad)"/>
+    <circle cx="420" cy="180" r="17" fill="none" stroke="#fde68a" stroke-width="1.5" opacity="0.5"/>
+    <text x="420" y="187" text-anchor="middle" font-family="Arial" font-size="22" font-weight="bold" fill="#fffbeb">$</text>
+  </g>
+  <g opacity="0.5" filter="url(#shadowSmall)">
+    <!-- Small coin 2 -->
+    <circle cx="440" cy="130" r="16" fill="url(#coinGrad)"/>
+    <text x="440" y="136" text-anchor="middle" font-family="Arial" font-size="16" font-weight="bold" fill="#fffbeb">$</text>
+  </g>
+
+  <!-- Sparkle effects -->
+  <g fill="white" opacity="0.8">
+    <polygon points="456,96 460,88 464,96 472,100 464,104 460,112 456,104 448,100" transform="scale(0.8) translate(40, 10)"/>
+    <polygon points="120,420 123,414 126,420 132,423 126,426 123,432 120,426 114,423" opacity="0.5"/>
+    <polygon points="80,120 82,116 84,120 88,122 84,124 82,128 80,124 76,122" opacity="0.4"/>
+  </g>
+
+  <!-- Bottom text "MegaWiFi" subtle branding -->
+  <text x="168" y="420" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="bold" fill="white" opacity="0.5" letter-spacing="1">MegaWiFi</text>
+</svg>

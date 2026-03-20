@@ -1,0 +1,13 @@
+[Unit]
+Description=iptables Helper for MegaWiFi Docker
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/opt/megawifi/iptables-helper.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

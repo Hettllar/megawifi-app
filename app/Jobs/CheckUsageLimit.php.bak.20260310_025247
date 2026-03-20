@@ -1,0 +1,413 @@
+<?php
+
+namespace App\Jobs;
+
+use App\Models\Router;
+use App\Models\Subscriber;
+use App\Models\SyncSetting;
+use App\Services\UserManagerService;
+use App\Services\MikroTikService;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
+
+class CheckUsageLimit implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    /**
+     * Maximum seconds this job can run (22 routers with bulk monitor)
+     */
+    public $timeout = 600;
+
+    /**
+     * البروفايل المقيد (سرعة بطيئة)
+     * يجب إنشاؤه على الراوتر مسبقاً بسرعة 1k/1k
+     */
+    protected string $throttledProfile;
+
+    public function __construct()
+    {
+        // جلب اسم البروفايل من الإعدادات
+        $this->throttledProfile = config('mikrotik.throttle.profile', 'STOP');
+    }
+
+    /**
+     * Execute the job - Check all UserManager subscribers for usage limits
+     * النهج الجديد: تقييد السرعة بدلاً من الإيقاف
+     */
+    public function handle(): void
+    {
+        Log::info('CheckUsageLimit: بدء فحص استهلاك المشتركين...');
+
+        // Get all active routers
+        $routers = Router::where('is_active', true)->get();
+        
+        $stats = [
+            'checked' => 0,
+            'throttled' => 0,
+            'unthrottled' => 0,
+            'errors' => 0,
+        ];
+
+        foreach ($routers as $router) {
+            try {
+                // Circuit breaker: skip routers that failed recently (15 min cooldown)
+                $cacheKey = 'router_cb_' . $router->id;
+                $failCount = Cache::get($cacheKey, 0);
+                if ($failCount >= 1) {
+                    // Already failed once, skip for 15 minutes
+                    continue;
+                }
+
+                // Quick port check before attempting full connection (2 second timeout)
+                $connectionIP = $router->wg_enabled && $router->wg_client_ip
+                    ? $router->wg_client_ip : $router->ip_address;
+                $port = $router->api_port ?: 8728;
+                $sock = @fsockopen($connectionIP, $port, $errno, $errstr, 2);
+                if (!$sock) {
+                    // Port not responding - mark as failed, skip
+                    Cache::put($cacheKey, $failCount + 1, now()->addMinutes(15));
+                    Log::warning("CheckUsageLimit: الراوتر {$router->name} ({$connectionIP}:{$port}) لا يستجيب - تخطي 15 دقيقة");
+                    $stats['errors']++;
+                    continue;
+                }
+                @fclose($sock);
+
+                $result = $this->checkRouterUsage($router);
+                $stats['checked'] += $result['checked'];
+                $stats['throttled'] += $result['throttled'];
+                $stats['unthrottled'] += $result['unthrottled'];
+
+                // Reset circuit breaker on success
+                Cache::forget($cacheKey);
+            } catch (\Exception $e) {
+                Log::error("CheckUsageLimit: خطأ في الراوتر {$router->name}: " . $e->getMessage());
+                $stats['errors']++;
+
+                // Mark as failed for 15 minutes
+                Cache::put('router_cb_' . $router->id, 1, now()->addMinutes(15));
+            }
+        }
+
+        Log::warning("CheckUsageLimit: الملخص - تم فحص {$stats['checked']} مشترك، " .
+            "تم تقييد {$stats['throttled']}، تم رفع التقييد عن {$stats['unthrottled']}, " .
+            "أخطاء: {$stats['errors']}");
+    }
+
+    /**
+     * Check usage for all subscribers on a specific router
+     */
+    protected function checkRouterUsage(Router $router): array
+    {
+        $service = new UserManagerService($router);
+        
+        if (!$service->connect()) {
+            Log::warning("CheckUsageLimit: فشل الاتصال بالراوتر {$router->name}");
+            return ['checked' => 0, 'throttled' => 0, 'unthrottled' => 0];
+        }
+
+        $stats = ['checked' => 0, 'throttled' => 0, 'unthrottled' => 0];
+
+        try {
+            // First, refresh usage data from UserManager directly (أفضل من Sessions)
+            // This gets actual usage from /user-manager/user/print
+            $this->refreshUsageFromUserManager($service, $router);
+            
+            // Also refresh from sessions for currently connected users
+            $this->refreshUsageFromSessions($service, $router);
+
+            // Get all UserManager subscribers for this router that have data limits
+            // Check both data_limit (bytes) and data_limit_gb
+            $subscribers = Subscriber::where('router_id', $router->id)
+                ->where('type', 'usermanager')
+                ->where('status', 'active')
+                ->where(function($q) {
+                    $q->where('data_limit', '>', 0)
+                      ->orWhere('data_limit_gb', '>', 0);
+                })
+                ->get();
+
+            foreach ($subscribers as $subscriber) {
+                $stats['checked']++;
+                
+                try {
+                    // Get the effective data limit in bytes (data_limit_gb is the primary source)
+                    $dataLimit = null;
+                    if ($subscriber->data_limit_gb > 0) {
+                        $dataLimit = (int)($subscriber->data_limit_gb * 1073741824);
+                    } elseif ($subscriber->data_limit > 0) {
+                        $dataLimit = $subscriber->data_limit;
+                    }
+                    
+                    if ($dataLimit > 0 && $subscriber->total_bytes >= $dataLimit) {
+                        // تجاوز الحد - تقييد السرعة
+                        if (!$subscriber->is_throttled) {
+                            $this->throttleSubscriber($service, $subscriber);
+                            $stats['throttled']++;
+                        }
+                    } else {
+                        // لم يتجاوز الحد - إذا كان مقيد، رفع التقييد
+                        if ($subscriber->is_throttled) {
+                            $this->unthrottleSubscriber($service, $subscriber);
+                            $stats['unthrottled']++;
+                        }
+                    }
+                } catch (\Exception $e) {
+                    Log::error("CheckUsageLimit: خطأ مع المشترك {$subscriber->username}: " . $e->getMessage());
+                }
+            }
+
+        } catch (\Exception $e) {
+            Log::error("CheckUsageLimit: خطأ أثناء فحص الراوتر {$router->name}: " . $e->getMessage());
+        } finally {
+            $service->disconnect();
+        }
+
+        return $stats;
+    }
+
+    /**
+     * تقييد سرعة المشترك عند تجاوز الحد
+     */
+    protected function throttleSubscriber(UserManagerService $service, Subscriber $subscriber): bool
+    {
+        try {
+            $username = $subscriber->username;
+            
+            if (!$username) {
+                Log::warning("CheckUsageLimit: المشترك ليس لديه اسم مستخدم");
+                return false;
+            }
+
+            // حفظ البروفايل الأصلي إذا لم يكن محفوظ
+            if (empty($subscriber->original_profile)) {
+                $subscriber->original_profile = $subscriber->profile;
+            }
+
+            // تغيير البروفايل إلى المقيد - استخدام username
+            $service->changeUserProfileByName($username, $this->throttledProfile);
+
+            // قطع جلسة PPP لإجبار إعادة الاتصال بالبروفايل المقيد
+            try {
+                $mkService = new MikroTikService($subscriber->router);
+                $mkService->connect();
+                $pppActive = $mkService->getPPPActive();
+                foreach ($pppActive as $session) {
+                    if (isset($session['name']) && $session['name'] === $username) {
+                        $mkService->disconnectPPPUser($session['.id']);
+                        Log::warning("CheckUsageLimit: قطع جلسة PPP لـ {$username} لتطبيق التقييد");
+                        break;
+                    }
+                }
+                $mkService->disconnect();
+            } catch (\Exception $e) {
+                Log::warning("CheckUsageLimit: فشل قطع PPP لـ {$username}: " . $e->getMessage());
+            }
+
+            // تحديث قاعدة البيانات
+            $subscriber->update([
+                'profile' => $this->throttledProfile,
+                'is_throttled' => true,
+                'throttled_at' => now(),
+            ]);
+
+            Log::warning("CheckUsageLimit: تم تقييد سرعة المشترك {$subscriber->username} - " .
+                "استهلك {$this->formatBytes($subscriber->total_bytes)} من {$subscriber->data_limit_gb} GB");
+            
+            return true;
+        } catch (\Exception $e) {
+            Log::error("CheckUsageLimit: فشل تقييد المشترك {$subscriber->username}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * رفع التقييد عن المشترك
+     */
+    protected function unthrottleSubscriber(UserManagerService $service, Subscriber $subscriber): bool
+    {
+        try {
+            $username = $subscriber->username;
+            
+            if (!$username) {
+                return false;
+            }
+
+            // إرجاع البروفايل الأصلي
+            $originalProfile = $subscriber->original_profile ?? 'default';
+            
+            $service->changeUserProfileByName($username, $originalProfile);
+
+            // قطع جلسة PPP لإجبار إعادة الاتصال بالبروفايل الأصلي
+            try {
+                $mkService = new MikroTikService($subscriber->router);
+                $mkService->connect();
+                $pppActive = $mkService->getPPPActive();
+                foreach ($pppActive as $session) {
+                    if (isset($session['name']) && $session['name'] === $username) {
+                        $mkService->disconnectPPPUser($session['.id']);
+                        Log::warning("CheckUsageLimit: قطع جلسة PPP لـ {$username} لتطبيق البروفايل الأصلي");
+                        break;
+                    }
+                }
+                $mkService->disconnect();
+            } catch (\Exception $e) {
+                Log::warning("CheckUsageLimit: فشل قطع PPP لـ {$username}: " . $e->getMessage());
+            }
+
+            // تحديث قاعدة البيانات
+            $subscriber->update([
+                'profile' => $originalProfile,
+                'is_throttled' => false,
+                'throttled_at' => null,
+            ]);
+
+            Log::warning("CheckUsageLimit: تم رفع التقييد عن المشترك {$subscriber->username}");
+            
+            return true;
+        } catch (\Exception $e) {
+            Log::error("CheckUsageLimit: فشل رفع التقييد عن {$subscriber->username}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Refresh usage data from /user-manager/user/print directly
+     * هذه الطريقة أفضل من Sessions لأنها تُظهر الاستهلاك الكلي حتى للمستخدمين غير المتصلين
+     */
+    protected function refreshUsageFromUserManager(UserManagerService $service, Router $router): void
+    {
+        try {
+            // Use UM7 monitor to get actual Total Download/Upload (shown in Winbox Users tab)
+            $counters = $service->getUserMonitorCounters();
+
+            if (empty($counters)) {
+                Log::debug("CheckUsageLimit: لا يوجد بيانات monitor لـ {$router->name} - استخدام الجلسات كبديل");
+                return;
+            }
+
+            // Load all matching subscribers at once
+            $subscribersByUsername = Subscriber::where('router_id', $router->id)
+                ->whereIn('username', array_keys($counters))
+                ->get()
+                ->keyBy('username');
+
+            $updated = 0;
+            foreach ($counters as $username => $data) {
+                $subscriber = $subscribersByUsername[$username] ?? null;
+                if (!$subscriber) continue;
+
+                // Skip recently reset subscribers (within 5 minutes)
+                if ($subscriber->usage_reset_at && $subscriber->usage_reset_at->diffInMinutes(now()) < 5) {
+                    continue;
+                }
+
+                // Use cumulative UM7 total (same as Winbox Users tab)
+                $umTotal = $data['total-download'] + $data['total-upload'];
+                $totalBytes = $umTotal;
+
+                // Only update if value changed significantly (avoid unnecessary writes)
+                if ($totalBytes > $subscriber->total_bytes) {
+                    $subscriber->update([
+                        'bytes_in' => $data['total-upload'],
+                        'bytes_out' => $data['total-download'],
+                        'total_bytes' => $totalBytes,
+                    ]);
+                    $updated++;
+                }
+            }
+
+            Log::warning("CheckUsageLimit: تم تحديث {$updated} مشترك من UM monitor في {$router->name}");
+
+        } catch (\Exception $e) {
+            Log::warning("CheckUsageLimit: فشل جلب بيانات UM monitor: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Refresh usage data from UserManager sessions
+     * This gets accurate usage data instead of relying on syncUsers
+     */
+    protected function refreshUsageFromSessions(UserManagerService $service, Router $router): void
+    {
+        try {
+            $allSessions = $service->getAllSessions();
+            
+            if (empty($allSessions)) {
+                return;
+            }
+
+            // Calculate usage per user from sessions
+            $usageByUser = [];
+            foreach ($allSessions as $session) {
+                if (!isset($session['user'])) continue;
+                
+                $username = $session['user'];
+                if (!isset($usageByUser[$username])) {
+                    $usageByUser[$username] = [
+                        'download' => 0,
+                        'upload' => 0,
+                    ];
+                }
+                
+                $usageByUser[$username]['download'] += (int)($session['download'] ?? 0);
+                $usageByUser[$username]['upload'] += (int)($session['upload'] ?? 0);
+            }
+
+            // تحميل جميع المشتركين مرة واحدة (محسن للأداء)
+            $subscribersByUsername = Subscriber::where('router_id', $router->id)
+                ->whereIn('username', array_keys($usageByUser))
+                ->get()
+                ->keyBy('username');
+
+            // Update local database for each user
+            foreach ($usageByUser as $username => $usage) {
+                $subscriber = $subscribersByUsername[$username] ?? null;
+                
+                if (!$subscriber) {
+                    continue;
+                }
+
+                // تجاهل المشتركين الذين تم تجديدهم حديثاً (خلال 5 دقائق)
+                if ($subscriber->usage_reset_at && $subscriber->usage_reset_at->diffInMinutes(now()) < 5) {
+                    continue;
+                }
+
+                $totalBytes = $usage['download'] + $usage['upload'] + ($subscriber->archived_bytes ?? 0);
+                
+                // تحديث فقط إذا كان الاستهلاك من Session أعلى
+                if ($totalBytes > $subscriber->total_bytes) {
+                    $subscriber->update([
+                        'bytes_in' => $usage['upload'],
+                        'bytes_out' => $usage['download'],
+                        'total_bytes' => $totalBytes,
+                    ]);
+                }
+            }
+            
+            Log::debug("CheckUsageLimit: تم تحديث بيانات الاستهلاك من الجلسات في {$router->name}");
+            
+        } catch (\Exception $e) {
+            Log::warning("CheckUsageLimit: فشل تحديث بيانات الجلسات: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Format bytes to human readable format
+     */
+    protected function formatBytes(int $bytes): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $i = 0;
+        while ($bytes >= 1024 && $i < count($units) - 1) {
+            $bytes /= 1024;
+            $i++;
+        }
+        return round($bytes, 2) . ' ' . $units[$i];
+    }
+}

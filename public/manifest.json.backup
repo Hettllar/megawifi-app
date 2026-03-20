@@ -1,0 +1,46 @@
+{
+    "name": "MegaWiFi - لوحة التحكم",
+    "short_name": "MegaWiFi",
+    "description": "تطبيق إدارة شبكات الإنترنت والمشتركين",
+    "start_url": "/dashboard",
+    "display": "standalone",
+    "background_color": "#991b1b",
+    "theme_color": "#991b1b",
+    "orientation": "portrait-primary",
+    "lang": "ar",
+    "dir": "rtl",
+    "icons": [
+        {
+            "src": "/icons/icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any"
+        },
+        {
+            "src": "/favicon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "maskable"
+        }
+    ],
+    "categories": ["business", "utilities"],
+    "screenshots": [],
+    "shortcuts": [
+        {
+            "name": "يوزرمانجر",
+            "url": "/usermanager"
+        },
+        {
+            "name": "هوتسبوت",
+            "url": "/hotspot"
+        },
+        {
+            "name": "الراوترات",
+            "url": "/routers"
+        },
+        {
+            "name": "التحقق من الرصيد",
+            "url": "/check-balance"
+        }
+    ]
+}

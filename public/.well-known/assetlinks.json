@@ -1,0 +1,10 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "site.megawifi.twa",
+    "sha256_cert_fingerprints": [
+      "40:37:76:9F:CC:B5:BA:4A:3C:45:D0:DA:40:1B:B4:43:A3:D3:82:C8:DD:C7:48:58:C7:DC:EF:1B:B5:9B:A7:A9"
+    ]
+  }
+}]

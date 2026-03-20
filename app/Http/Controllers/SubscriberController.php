@@ -1,0 +1,944 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Router;
+use App\Models\Subscriber;
+use App\Models\ServicePlan;
+use App\Models\ActivityLog;
+use App\Services\MikroTikService;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Carbon\Carbon;
+use Exception;
+
+class SubscriberController extends Controller
+{
+    /**
+     * Display a listing of subscribers
+     */
+    public function index(Request $request)
+    {
+        $user = Auth::user();
+        
+        $routerIds = $user->isSuperAdmin() 
+            ? Router::pluck('id') 
+            : $user->routers()->pluck('routers.id');
+
+        $query = Subscriber::whereIn('router_id', $routerIds)->with(['router', 'activeSessions']);
+
+        // Filter by router
+        if ($request->filled('router_id') && $routerIds->contains($request->router_id)) {
+            $query->where('router_id', $request->router_id);
+        }
+
+        // Filter by type (required - ppp/pppoe or hotspot)
+        $type = $request->input('type', 'pppoe'); // Default to pppoe/broadband
+        if (in_array($type, ['pppoe', 'ppp'])) {
+            $query->where('type', 'ppp'); // pppoe maps to ppp in database
+        } elseif ($type === 'hotspot') {
+            $query->where('type', 'hotspot');
+        }
+
+        // Filter by status
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        // Search
+        if ($request->filled('search')) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('username', 'like', "%{$search}%")
+                  ->orWhere('full_name', 'like', "%{$search}%")
+                  ->orWhere('phone', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%");
+            });
+        }
+
+        $subscribers = $query->orderBy('created_at', 'desc')->get();
+
+        $routers = Router::whereIn('id', $routerIds)->get();
+
+        return view('subscribers.index', compact('subscribers', 'routers'));
+    }
+
+    /**
+     * Show the form for creating a new subscriber
+     */
+    public function create(Request $request)
+    {
+        $user = Auth::user();
+        
+        $routerIds = $user->isSuperAdmin() 
+            ? Router::pluck('id') 
+            : $user->routers()->pluck('routers.id');
+
+        $routers = Router::whereIn('id', $routerIds)->get();
+        
+        $selectedRouter = $request->filled('router_id') 
+            ? Router::findOrFail($request->router_id) 
+            : $routers->first();
+
+        $this->authorize('view', $selectedRouter);
+
+        $plans = $selectedRouter 
+            ? $selectedRouter->servicePlans 
+            : collect();
+
+        return view('subscribers.create', compact('routers', 'selectedRouter', 'plans'));
+    }
+
+    /**
+     * Store a newly created subscriber
+     */
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'router_id' => 'required|exists:routers,id',
+            'username' => 'required|string|max:255',
+            'password' => 'required|string|max:255',
+            'type' => 'required|in:ppp,hotspot,usermanager',
+            'profile' => 'required|string|max:255',
+            'full_name' => 'nullable|string|max:255',
+            'phone' => 'nullable|string|max:50',
+            'email' => 'nullable|email|max:255',
+            'address' => 'nullable|string',
+            'caller_id' => 'nullable|string|max:255',
+            'local_address' => 'nullable|ip',
+            'remote_address' => 'nullable|ip',
+            'expiry_date' => 'nullable|date',
+            'comment' => 'nullable|string',
+        ]);
+
+        $router = Router::findOrFail($validated['router_id']);
+        $this->authorize('view', $router);
+
+        // Check unique username on router
+        $exists = Subscriber::where('router_id', $router->id)
+            ->where('username', $validated['username'])
+            ->exists();
+
+        if ($exists) {
+            return back()->withErrors(['username' => 'اسم المستخدم موجود مسبقاً على هذا الراوتر'])->withInput();
+        }
+
+        // Add to MikroTik
+        try {
+            $service = new MikroTikService($router);
+            $service->connect();
+
+            if ($validated['type'] === 'ppp') {
+                $result = $service->addPPPSecret([
+                    'name' => $validated['username'],
+                    'password' => $validated['password'],
+                    'profile' => $validated['profile'],
+                    'local-address' => $validated['local_address'] ?? '',
+                    'remote-address' => $validated['remote_address'] ?? '',
+                    'caller-id' => $validated['caller_id'] ?? '',
+                    'comment' => $validated['comment'] ?? '',
+                ]);
+            } else if ($validated['type'] === 'hotspot') {
+                $result = $service->addHotspotUser([
+                    'name' => $validated['username'],
+                    'password' => $validated['password'],
+                    'profile' => $validated['profile'],
+                    'mac-address' => $validated['caller_id'] ?? '',
+                    'comment' => $validated['comment'] ?? '',
+                ]);
+            } else {
+                $result = $service->addUserManagerUser([
+                    'name' => $validated['username'],
+                    'password' => $validated['password'],
+                    'group' => $validated['profile'],
+                    'comment' => $validated['comment'] ?? '',
+                ]);
+            }
+
+            $mikrotikId = $result['ret'] ?? null;
+            $service->disconnect();
+        } catch (Exception $e) {
+            return back()->withErrors(['mikrotik' => 'فشل الإضافة إلى الراوتر: ' . $e->getMessage()])->withInput();
+        }
+
+        // Save to database
+        $subscriber = Subscriber::create([
+            'router_id' => $router->id,
+            'mikrotik_id' => $mikrotikId,
+            'username' => $validated['username'],
+            'password' => $validated['password'],
+            'type' => $validated['type'],
+            'profile' => $validated['profile'],
+            'full_name' => $validated['full_name'] ?? null,
+            'phone' => $validated['phone'] ?? null,
+            'email' => $validated['email'] ?? null,
+            'address' => $validated['address'] ?? null,
+            'caller_id' => $validated['caller_id'] ?? null,
+            'local_address' => $validated['local_address'] ?? null,
+            'remote_address' => $validated['remote_address'] ?? null,
+            'expiry_date' => $validated['expiry_date'] ?? null,
+            'comment' => $validated['comment'] ?? null,
+            'status' => 'active',
+            'is_synced' => true,
+            'last_synced_at' => now(),
+        ]);
+
+        ActivityLog::log('subscriber.created', "إضافة مشترك جديد: {$subscriber->username}", null, $subscriber->router_id, Subscriber::class, $subscriber->id);
+
+        return redirect()->route('subscribers.show', $subscriber)
+            ->with('success', 'تم إضافة المشترك بنجاح');
+    }
+
+    /**
+     * Display the specified subscriber
+     */
+    public function show(Subscriber $subscriber)
+    {
+        $this->authorize('view', $subscriber->router);
+
+        $subscriber->load(['router', 'servicePlan', 'invoices' => function ($q) {
+            $q->latest()->take(10);
+        }]);
+
+        $activeSessions = $subscriber->activeSessions()->get();
+
+        return view('subscribers.show', compact('subscriber', 'activeSessions'));
+    }
+
+    /**
+     * Generate printable contract for subscriber
+     */
+    public function contract(Subscriber $subscriber)
+    {
+        $this->authorize('view', $subscriber->router);
+
+        $subscriber->load('router');
+
+        return view('subscribers.contract', compact('subscriber'));
+    }
+
+    /**
+     * Show the form for editing the subscriber
+     */
+    public function edit(Subscriber $subscriber)
+    {
+        $this->authorize('view', $subscriber->router);
+
+        // Load active sessions
+        $subscriber->load('activeSessions', 'router');
+
+        // Get PPP profiles from router
+        $profiles = [];
+        try {
+            $service = new MikroTikService($subscriber->router);
+            $service->connect();
+            $rawProfiles = $service->getPPPProfiles();
+            
+            // Ensure profiles have the expected structure
+            foreach ($rawProfiles as $profile) {
+                if (isset($profile['name'])) {
+                    $profiles[] = [
+                        'name' => $profile['name'],
+                        'rate-limit' => $profile['rate-limit'] ?? null,
+                    ];
+                }
+            }
+        } catch (\Exception $e) {
+            // If can't connect, use subscriber's current profile as fallback
+        }
+        
+        // Always include subscriber's current profile if not in list
+        $profileNames = array_column($profiles, 'name');
+        if ($subscriber->profile && !in_array($subscriber->profile, $profileNames)) {
+            array_unshift($profiles, ['name' => $subscriber->profile, 'rate-limit' => null]);
+        }
+        
+        // If still empty, add a placeholder
+        if (empty($profiles)) {
+            $profiles = [['name' => $subscriber->profile ?: 'default', 'rate-limit' => null]];
+        }
+
+        return view('subscribers.edit', compact('subscriber', 'profiles'));
+    }
+
+    /**
+     * Update the specified subscriber
+     */
+    public function update(Request $request, Subscriber $subscriber)
+    {
+        $this->authorize('view', $subscriber->router);
+
+        $validated = $request->validate([
+            'password' => 'nullable|string|max:255',
+            'profile' => 'required|string|max:255',
+            'full_name' => 'nullable|string|max:255',
+            'phone' => 'nullable|string|max:50',
+            'national_id' => 'nullable|string|max:50',
+            'email' => 'nullable|email|max:255',
+            'address' => 'nullable|string',
+            'caller_id' => 'nullable|string|max:255',
+            'local_address' => 'nullable|ip',
+            'remote_address' => 'nullable|ip',
+            'expiry_date' => 'nullable|date',
+            'status' => 'required|in:active,disabled,expired',
+            'comment' => 'nullable|string',
+            'iptv_allowed_ips' => 'nullable|string|max:500',
+        ]);
+
+        // Update in MikroTik
+        if ($subscriber->mikrotik_id) {
+            try {
+                $service = new MikroTikService($subscriber->router);
+                $service->connect();
+
+                $mikrotikData = [
+                    'profile' => $validated['profile'],
+                    'caller-id' => $validated['caller_id'] ?? '',
+                    'local-address' => $validated['local_address'] ?? '',
+                    'remote-address' => $validated['remote_address'] ?? '',
+                    'comment' => $validated['comment'] ?? '',
+                    'disabled' => $validated['status'] === 'disabled' || $validated['status'] === 'expired',
+                ];
+
+                if (!empty($validated['password'])) {
+                    $mikrotikData['password'] = $validated['password'];
+                }
+
+                if ($subscriber->type === 'ppp') {
+                    $service->updatePPPSecret($subscriber->mikrotik_id, $mikrotikData);
+                } else if ($subscriber->type === 'hotspot') {
+                    $mikrotikData['mac-address'] = $validated['caller_id'] ?? '';
+                    $service->updateHotspotUser($subscriber->mikrotik_id, $mikrotikData);
+                } else {
+                    $service->updateUserManagerUser($subscriber->mikrotik_id, $mikrotikData);
+                }
+
+                $service->disconnect();
+            } catch (Exception $e) {
+                return back()->withErrors(['mikrotik' => 'فشل التحديث على الراوتر: ' . $e->getMessage()])->withInput();
+            }
+        }
+
+        // Update database
+        $updateData = [
+            'profile' => $validated['profile'],
+            'full_name' => $validated['full_name'] ?? null,
+            'phone' => $validated['phone'] ?? null,
+            'national_id' => $validated['national_id'] ?? null,
+            'email' => $validated['email'] ?? null,
+            'address' => $validated['address'] ?? null,
+            'caller_id' => $validated['caller_id'] ?? null,
+            'local_address' => $validated['local_address'] ?? null,
+            'remote_address' => $validated['remote_address'] ?? null,
+            'expiry_date' => $validated['expiry_date'] ?? null,
+            'status' => $validated['status'],
+            'comment' => $validated['comment'] ?? null,
+            'iptv_allowed_ips' => $validated['iptv_allowed_ips'] ?? null,
+            'is_synced' => true,
+            'last_synced_at' => now(),
+        ];
+
+        if (!empty($validated['password'])) {
+            $updateData['password'] = $validated['password'];
+        }
+
+        $subscriber->update($updateData);
+
+        ActivityLog::log('subscriber.updated', "تحديث المشترك: {$subscriber->username}", null, $subscriber->router_id, Subscriber::class, $subscriber->id);
+
+        return redirect()->route('subscribers.edit', $subscriber)
+            ->with('success', 'تم تحديث بيانات المشترك بنجاح');
+    }
+
+    /**
+     * Remove the specified subscriber
+     */
+    public function destroy(Subscriber $subscriber)
+    {
+        $this->authorize('view', $subscriber->router);
+
+        // Delete from MikroTik
+        if ($subscriber->mikrotik_id) {
+            try {
+                $service = new MikroTikService($subscriber->router);
+                $service->connect();
+
+                if ($subscriber->type === 'ppp') {
+                    $service->deletePPPSecret($subscriber->mikrotik_id);
+                } else if ($subscriber->type === 'hotspot') {
+                    $service->deleteHotspotUser($subscriber->mikrotik_id);
+                } else {
+                    $service->deleteUserManagerUser($subscriber->mikrotik_id);
+                }
+
+                $service->disconnect();
+            } catch (Exception $e) {
+                return back()->withErrors(['mikrotik' => 'فشل الحذف من الراوتر: ' . $e->getMessage()]);
+            }
+        }
+
+        $username = $subscriber->username;
+        $subscriber->delete();
+
+        ActivityLog::log('subscriber.deleted', "حذف المشترك: {$username}");
+
+        return redirect()->route('subscribers.index')
+            ->with('success', 'تم حذف المشترك بنجاح');
+    }
+
+    /**
+     * Disconnect active session (force reconnect)
+     * This ends the current session and allows the subscriber to start a new one
+     */
+    public function disconnect(Subscriber $subscriber)
+    {
+        $this->authorize('view', $subscriber->router);
+
+        try {
+            $service = new MikroTikService($subscriber->router);
+            $service->connect();
+
+            $disconnected = false;
+
+            // Find and disconnect active sessions
+            if ($subscriber->type === 'ppp') {
+                $active = $service->getPPPActive();
+                foreach ($active as $session) {
+                    if (($session['name'] ?? '') === $subscriber->username) {
+                        $service->disconnectPPPUser($session['.id']);
+                        $disconnected = true;
+                    }
+                }
+            } else if ($subscriber->type === 'hotspot') {
+                $active = $service->getHotspotActive();
+                foreach ($active as $session) {
+                    if (($session['user'] ?? '') === $subscriber->username) {
+                        $service->disconnectHotspotUser($session['.id']);
+                        $disconnected = true;
+                    }
+                }
+            }
+
+            $service->disconnect();
+
+            if (!$disconnected) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'المشترك غير متصل حالياً',
+                ], 422);
+            }
+
+            // Don't delete local sessions - they will be updated on next sync
+            // This keeps the UI showing the disconnect button
+
+            ActivityLog::log('subscriber.disconnected', "قطع اتصال المشترك: {$subscriber->username}", null, $subscriber->router_id, Subscriber::class, $subscriber->id);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'تم قطع الاتصال - سيتم إعادة الاتصال تلقائياً',
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'فشل قطع الاتصال: ' . $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * Toggle subscriber profile (stop/restore original profile)
+     * stop profile = 1k/1k (very slow connection)
+     */
+    public function toggle(Subscriber $subscriber)
+    {
+        $this->authorize('view', $subscriber->router);
+
+        $stopProfile = 'stop';
+        $isCurrentlyStopped = strtolower($subscriber->profile) === $stopProfile;
+        
+        // Determine new profile
+        if ($isCurrentlyStopped) {
+            // Restore original profile from comment or use default
+            $originalProfile = $subscriber->comment && str_starts_with($subscriber->comment, 'original_profile:') 
+                ? str_replace('original_profile:', '', explode("\n", $subscriber->comment)[0])
+                : 'default';
+            $newProfile = $originalProfile;
+            $newStatus = 'active';
+        } else {
+            // Save original profile in comment and switch to stop
+            $originalComment = $subscriber->comment ?? '';
+            $newComment = 'original_profile:' . $subscriber->profile . "\n" . $originalComment;
+            $subscriber->comment = $newComment;
+            $newProfile = $stopProfile;
+            $newStatus = 'disabled';
+        }
+
+        // Update in MikroTik
+        try {
+            $service = new MikroTikService($subscriber->router);
+            $service->connect();
+
+            $mikrotikId = $subscriber->mikrotik_id;
+
+            // If no mikrotik_id, find by username
+            if (!$mikrotikId) {
+                if ($subscriber->type === 'ppp') {
+                    $secrets = $service->getPPPSecrets();
+                    foreach ($secrets as $secret) {
+                        if (($secret['name'] ?? '') === $subscriber->username) {
+                            $mikrotikId = $secret['.id'];
+                            // Save the mikrotik_id for future use
+                            $subscriber->mikrotik_id = $mikrotikId;
+                            break;
+                        }
+                    }
+                } else if ($subscriber->type === 'hotspot') {
+                    $users = $service->getHotspotUsers();
+                    foreach ($users as $user) {
+                        if (($user['name'] ?? '') === $subscriber->username) {
+                            $mikrotikId = $user['.id'];
+                            $subscriber->mikrotik_id = $mikrotikId;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (!$mikrotikId) {
+                $service->disconnect();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'لم يتم العثور على المشترك في الراوتر',
+                ], 422);
+            }
+
+            if ($subscriber->type === 'ppp') {
+                $service->updatePPPSecret($mikrotikId, ['profile' => $newProfile]);
+            } else if ($subscriber->type === 'hotspot') {
+                $service->updateHotspotUser($mikrotikId, ['profile' => $newProfile]);
+            } else {
+                $service->updateUserManagerUser($mikrotikId, ['group' => $newProfile]);
+            }
+
+            $service->disconnect();
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'فشل تغيير البروفايل: ' . $e->getMessage(),
+            ], 422);
+        }
+
+        $subscriber->update([
+            'profile' => $newProfile,
+            'status' => $newStatus,
+            'comment' => $subscriber->comment,
+            'mikrotik_id' => $subscriber->mikrotik_id,
+        ]);
+
+        // Disconnect the user to apply new profile immediately
+        if (!$isCurrentlyStopped) {
+            try {
+                $service = new MikroTikService($subscriber->router);
+                $service->connect();
+                
+                if ($subscriber->type === 'ppp') {
+                    $active = $service->getPPPActive();
+                    foreach ($active as $session) {
+                        if (($session['name'] ?? '') === $subscriber->username) {
+                            $service->disconnectPPPUser($session['.id']);
+                        }
+                    }
+                } else if ($subscriber->type === 'hotspot') {
+                    $active = $service->getHotspotActive();
+                    foreach ($active as $session) {
+                        if (($session['user'] ?? '') === $subscriber->username) {
+                            $service->disconnectHotspotUser($session['.id']);
+                        }
+                    }
+                }
+                
+                $service->disconnect();
+            } catch (Exception $e) {
+                // Ignore disconnect errors
+            }
+        }
+
+        $action = $isCurrentlyStopped ? 'استعادة سرعة' : 'إيقاف مؤقت';
+        ActivityLog::log('subscriber.toggled', "{$action} المشترك: {$subscriber->username} -> {$newProfile}", null, $subscriber->router_id, Subscriber::class, $subscriber->id);
+
+        return response()->json([
+            'success' => true,
+            'message' => $isCurrentlyStopped ? 'تم استعادة السرعة الأصلية' : 'تم تحويل المشترك إلى بروفايل stop وقطع اتصاله',
+            'status' => $newStatus,
+            'profile' => $newProfile,
+        ]);
+    }
+
+    /**
+     * Renew subscription
+     */
+    public function renew(Request $request, Subscriber $subscriber)
+    {
+        $this->authorize('view', $subscriber->router);
+
+        $validated = $request->validate([
+            'days' => 'required|integer|min:1|max:365',
+            'data_limit' => 'nullable|integer|min:0',
+            'reset_consumption' => 'nullable|boolean',
+        ]);
+
+        $currentExpiry = $subscriber->expiry_date ? Carbon::parse($subscriber->expiry_date) : now();
+        
+        if ($currentExpiry->isPast()) {
+            $currentExpiry = now();
+        }
+
+        $newExpiry = $currentExpiry->addDays($validated['days']);
+
+        // Prepare update data
+        $updateData = [
+            'expiry_date' => $newExpiry,
+            'status' => 'active',
+        ];
+
+        // Set data limit (sync both bytes and GB fields)
+        $dataLimitGB = $validated['data_limit'] ?? 0;
+        if ($dataLimitGB > 0) {
+            $updateData['data_limit'] = (int)($dataLimitGB * 1073741824); // GB to bytes
+            $updateData['data_limit_gb'] = (float)$dataLimitGB;
+        } else {
+            $updateData['data_limit'] = null;
+            $updateData['data_limit_gb'] = null;
+        }
+
+        // Reset consumption if requested
+        if (!empty($validated['reset_consumption'])) {
+            $updateData['bytes_in'] = 0;
+            $updateData['bytes_out'] = 0;
+            $updateData['total_bytes'] = 0;
+            $updateData['archived_bytes'] = 0;
+            $updateData['um_usage_offset'] = 0;
+        }
+
+        $subscriber->update($updateData);
+
+        // Reset UM7 counters on router if usage was reset
+        if (!empty($validated['reset_consumption']) && $subscriber->type === 'usermanager') {
+            try {
+                $umService = new \App\Services\UserManagerService($subscriber->router);
+                $umService->connect();
+                $umService->resetUserUsage($subscriber->username);
+                $umService->disconnect();
+            } catch (\Exception $e) {
+                // Log but don't fail
+                \Illuminate\Support\Facades\Log::warning('SubscriberController: Failed to reset UM counters: ' . $e->getMessage());
+            }
+        }
+
+        // Enable in MikroTik if was disabled
+        if ($subscriber->mikrotik_id) {
+            try {
+                $service = new MikroTikService($subscriber->router);
+                $service->connect();
+
+                if ($subscriber->type === 'ppp') {
+                    $service->updatePPPSecret($subscriber->mikrotik_id, ['disabled' => false]);
+                } else if ($subscriber->type === 'hotspot') {
+                    $service->updateHotspotUser($subscriber->mikrotik_id, ['disabled' => false]);
+                }
+
+                $service->disconnect();
+            } catch (Exception $e) {
+                // Log but don't fail
+            }
+        }
+
+        $message = "تم تجديد الاشتراك لمدة {$validated['days']} يوم";
+        if ($dataLimitGB > 0) {
+            $message .= " مع حد {$dataLimitGB} جيجا";
+        }
+        if (!empty($validated['reset_consumption'])) {
+            $message .= " (تم تصفير الاستهلاك)";
+        }
+
+        ActivityLog::log('subscriber.renewed', "تجديد اشتراك: {$subscriber->username} لمدة {$validated['days']} يوم", null, $subscriber->router_id, Subscriber::class, $subscriber->id);
+
+        return response()->json([
+            'success' => true,
+            'message' => $message,
+            'expiry_date' => $newExpiry->format('Y-m-d'),
+        ]);
+    }
+
+    /**
+     * Sync active sessions from all routers with traffic data
+     */
+    public function syncSessions(Request $request)
+    {
+        $user = Auth::user();
+        
+        $routerIds = $user->isSuperAdmin() 
+            ? Router::where('status', 'online')->pluck('id') 
+            : $user->routers()->where('status', 'online')->pluck('routers.id');
+
+        $routers = Router::whereIn('id', $routerIds)->get();
+        
+        $totalSynced = 0;
+        $totalOnline = 0;
+        $totalTrafficIn = 0;
+        $totalTrafficOut = 0;
+        $errors = [];
+
+        foreach ($routers as $router) {
+            try {
+                $service = new MikroTikService($router);
+                $service->connect();
+                $result = $service->syncActiveSessions();
+                $totalSynced += $result['synced'] ?? 0;
+                $service->disconnect();
+            } catch (Exception $e) {
+                $errors[] = $router->name . ': ' . $e->getMessage();
+            }
+        }
+
+        // Get current active sessions stats
+        $activeSessions = \App\Models\ActiveSession::whereIn('router_id', $routerIds)->get();
+        $totalOnline = $activeSessions->count();
+        $totalTrafficIn = $activeSessions->sum('bytes_in');
+        $totalTrafficOut = $activeSessions->sum('bytes_out');
+
+        // Format traffic for display
+        $formatBytes = function($bytes) {
+            if ($bytes >= 1073741824) return number_format($bytes / 1073741824, 2) . ' GB';
+            if ($bytes >= 1048576) return number_format($bytes / 1048576, 2) . ' MB';
+            if ($bytes >= 1024) return number_format($bytes / 1024, 2) . ' KB';
+            return $bytes . ' B';
+        };
+
+        $message = "✅ تمت المزامنة بنجاح\n";
+        $message .= "👥 متصل الآن: {$totalOnline}\n";
+        $message .= "⬇️ تنزيل الجلسات: " . $formatBytes($totalTrafficIn) . "\n";
+        $message .= "⬆️ رفع الجلسات: " . $formatBytes($totalTrafficOut);
+        
+        if (!empty($errors)) {
+            $message .= "\n⚠️ أخطاء: " . implode(', ', $errors);
+        }
+
+        return response()->json([
+            'success' => empty($errors) || $totalSynced > 0,
+            'synced' => $totalSynced,
+            'online' => $totalOnline,
+            'traffic_in' => $totalTrafficIn,
+            'traffic_out' => $totalTrafficOut,
+            'message' => $message,
+        ]);
+    }
+
+    /**
+     * Export PPP/Broadband users backup
+     */
+    public function exportBackup(Request $request)
+    {
+        try {
+            $user = Auth::user();
+            $routerId = $request->router_id;
+            
+            $router = Router::findOrFail($routerId);
+            $this->authorize('view', $router);
+            
+            $service = new MikroTikService($router);
+            $service->connect();
+            
+            // Get all PPP secrets from router
+            $users = $service->getPPPSecrets();
+            $service->disconnect();
+            
+            $usersData = [];
+            foreach ($users as $u) {
+                if (!isset($u['name'])) continue;
+                
+                $usersData[] = [
+                    'username' => $u['name'] ?? '',
+                    'password' => $u['password'] ?? '',
+                    'profile' => $u['profile'] ?? 'default',
+                    'service' => $u['service'] ?? 'pppoe',
+                    'local_address' => $u['local-address'] ?? '',
+                    'remote_address' => $u['remote-address'] ?? '',
+                    'disabled' => ($u['disabled'] ?? 'false') === 'true',
+                    'comment' => $u['comment'] ?? '',
+                ];
+            }
+            
+            $backup = [
+                'backup_date' => now()->format('Y-m-d H:i:s'),
+                'router_name' => $router->name,
+                'router_ip' => $router->host,
+                'total_users' => count($usersData),
+                'users' => $usersData,
+            ];
+            
+            return response()->json([
+                'success' => true,
+                'router_name' => $router->name,
+                'backup' => $backup
+            ]);
+            
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'فشل التصدير: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Import/Restore PPP users from backup
+     */
+    public function importBackup(Request $request)
+    {
+        try {
+            $user = Auth::user();
+            $routerId = $request->router_id;
+            $backup = $request->backup;
+            
+            if (!$backup || !isset($backup['users']) || !is_array($backup['users'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'ملف النسخة الاحتياطية غير صالح'
+                ], 400);
+            }
+            
+            $router = Router::findOrFail($routerId);
+            $this->authorize('view', $router);
+            
+            $service = new MikroTikService($router);
+            $service->connect();
+            
+            $restored = 0;
+            $failed = 0;
+            $skipped = 0;
+            
+            // Get existing users to avoid duplicates
+            $existingUsers = $service->getPPPSecrets();
+            $existingUsernames = array_column($existingUsers, 'name');
+            
+            foreach ($backup['users'] as $u) {
+                if (!isset($u['username']) || !isset($u['password'])) {
+                    $failed++;
+                    continue;
+                }
+                
+                // Skip if already exists
+                if (in_array($u['username'], $existingUsernames)) {
+                    $skipped++;
+                    continue;
+                }
+                
+                try {
+                    // Add PPP secret to router
+                    $secretData = [
+                        'name' => $u['username'],
+                        'password' => $u['password'],
+                        'profile' => $u['profile'] ?? 'default',
+                        'service' => $u['service'] ?? 'pppoe',
+                    ];
+                    
+                    if (!empty($u['local_address'])) {
+                        $secretData['local-address'] = $u['local_address'];
+                    }
+                    if (!empty($u['remote_address'])) {
+                        $secretData['remote-address'] = $u['remote_address'];
+                    }
+                    if (!empty($u['comment'])) {
+                        $secretData['comment'] = $u['comment'];
+                    }
+                    if (!empty($u['disabled'])) {
+                        $secretData['disabled'] = 'true';
+                    }
+                    
+                    $service->addPPPSecret($secretData);
+                    $restored++;
+                    
+                } catch (Exception $e) {
+                    $failed++;
+                }
+            }
+            
+            $service->disconnect();
+            
+            // Also save to local database
+            foreach ($backup['users'] as $u) {
+                if (in_array($u['username'], $existingUsernames)) continue;
+                
+                Subscriber::updateOrCreate(
+                    ['router_id' => $router->id, 'username' => $u['username']],
+                    [
+                        'password' => $u['password'],
+                        'type' => 'ppp',
+                        'profile' => $u['profile'] ?? 'default',
+                        'status' => !empty($u['disabled']) ? 'disabled' : 'active',
+                    ]
+                );
+            }
+            
+            $message = "تم استعادة {$restored} مشترك بنجاح";
+            if ($skipped > 0) $message .= " (تم تجاهل {$skipped} موجود مسبقاً)";
+            if ($failed > 0) $message .= " (فشل {$failed})";
+            
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'restored' => $restored,
+                'skipped' => $skipped,
+                'failed' => $failed
+            ]);
+            
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'فشل الاستعادة: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Toggle IPTV service for subscriber
+     */
+    public function toggleIptv(Subscriber $subscriber)
+    {
+        $this->authorize('view', $subscriber->router);
+
+        try {
+            $subscriber->iptv_enabled = !$subscriber->iptv_enabled;
+            $subscriber->save();
+
+            // Create IPTV subscription if enabled and doesn't exist
+            if ($subscriber->iptv_enabled && !$subscriber->iptvSubscription) {
+                $username = 'iptv_sub_' . $subscriber->id;
+                $password = \Illuminate\Support\Str::random(12);
+                
+                \App\Models\IptvSubscription::create([
+                    'subscriber_id' => $subscriber->id,
+                    'user_id' => null,
+                    'username' => $username,
+                    'password' => $password,
+                    'expires_at' => now()->addYear(),
+                    'is_active' => 1,
+                    'max_connections' => 2,
+                    'notes' => 'اشتراك IPTV مجاني - تم التفعيل بواسطة الأدمن'
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => $subscriber->iptv_enabled ? 'تم تفعيل IPTV بنجاح' : 'تم إلغاء تفعيل IPTV بنجاح',
+                'iptv_enabled' => $subscriber->iptv_enabled,
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'فشل تغيير حالة IPTV: ' . $e->getMessage(),
+            ], 422);
+        }
+    }
+}

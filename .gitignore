@@ -1,0 +1,51 @@
+/node_modules
+/vendor
+/public/hot
+/public/storage
+/storage/*.key
+.env
+.env.backup
+.env.production
+.env.db
+.phpunit.result.cache
+Homestead.json
+Homestead.yaml
+auth.json
+npm-debug.log
+yarn-error.log
+/.fleet
+/.idea
+/.vscode
+
+# Exclude heavy files
+megawifi.sql
+*.sql.gz
+*.tar.gz
+
+# Exclude runtime directories
+/iptables-cmd/*
+/iptables-result/*
+/wg-cmd/*
+/wg-result/*
+
+# Keep the directories with .gitkeep
+!/iptables-cmd/.gitkeep
+!/iptables-result/.gitkeep
+!/wg-cmd/.gitkeep
+!/wg-result/.gitkeep
+
+# Exclude backups
+/backups/*
+!/backups/.gitkeep
+
+# Exclude storage generated files
+/storage/app/public/*
+/storage/framework/cache/data/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+/storage/logs/*
+!/storage/app/public/.gitkeep
+!/storage/framework/cache/.gitkeep
+!/storage/framework/sessions/.gitkeep
+!/storage/framework/views/.gitkeep
+!/storage/logs/.gitkeep

@@ -1,0 +1,112 @@
+@extends('layouts.app')
+
+@section('title', 'UserManager 7')
+
+@section('content')
+<div class=mb-3>
+    <div class=flex justify-between items-center>
+        <div class=flex items-center gap-2>
+            <div class=w-10 h-10 bg-gradient-to-br from-purple-500 to-indigo-600 rounded-lg flex items-center justify-center>
+                <i class=fas fa-users-cog text-white></i>
+            </div>
+            <div>
+                <h1 class=text-xl font-bold text-gray-800>UserManager 7</h1>
+                <p class=text-gray-500 text-sm>إدارة مشتركي UserManager</p>
+            </div>
+        </div>
+        @if($routers->count() > 0)
+        <div class=flex gap-2>
+            <a href={{ route('usermanager.packages.index') }} class=bg-orange-500 text-white px-3 py-2 rounded-lg text-sm>
+                <i class=fas fa-box ml-1></i> الباقات
+            </a>
+            <button onclick=syncAllRouters() class=bg-green-500 text-white px-3 py-2 rounded-lg text-sm>
+                <i class=fas fa-sync ml-1></i> مزامنة
+            </button>
+        </div>
+        @endif
+    </div>
+</div>
+
+<!-- Stats -->
+<div class=grid grid-cols-4 gap-2 mb-4>
+    <div class=bg-blue-50 rounded-lg p-3 text-center border border-blue-100>
+        <i class=fas fa-users text-blue-500 text-xl mb-1></i>
+        <p class=text-2xl font-bold text-blue-600>{{ $stats['total'] }}</p>
+        <p class=text-xs text-gray-500>الإجمالي</p>
+    </div>
+    <div class=bg-green-50 rounded-lg p-3 text-center border border-green-100>
+        <i class=fas fa-user-check text-green-500 text-xl mb-1></i>
+        <p class=text-2xl font-bold text-green-600>{{ $stats['active'] }}</p>
+        <p class=text-xs text-gray-500>نشط</p>
+    </div>
+    <div class=bg-emerald-50 rounded-lg p-3 text-center border border-emerald-100>
+        <i class=fas fa-wifi text-emerald-500 text-xl mb-1></i>
+        <p class=text-2xl font-bold text-emerald-600>{{ $stats['online'] ?? 0 }}</p>
+        <p class=text-xs text-gray-500>متصل</p>
+    </div>
+    <div class=bg-amber-50 rounded-lg p-3 text-center border border-amber-100>
+        <i class=fas fa-money-bill text-amber-500 text-xl mb-1></i>
+        <p class=text-2xl font-bold text-amber-600>{{ $stats['unpaid'] }}</p>
+        <p class=text-xs text-gray-500>غير مدفوع</p>
+    </div>
+</div>
+
+<!-- Subscribers Table -->
+<div class=bg-white rounded-lg shadow overflow-hidden>
+    <div class=p-3 border-b bg-gray-50 flex justify-between items-center>
+        <span class=text-gray-600 font-medium>{{ $subscribers->count() }} مستخدم</span>
+        @if(isset($lastSync))
+        <span class=text-xs text-gray-500>آخر مزامنة: {{ \Carbon\Carbon::parse($lastSync)->locale('ar')->diffForHumans() }}</span>
+        @endif
+    </div>
+    
+    @if($subscribers->isEmpty())
+    <div class=p-8 text-center>
+        <i class=fas fa-users text-gray-300 text-4xl mb-3></i>
+        <p class=text-gray-500>لا يوجد مستخدمين</p>
+    </div>
+    @else
+    <div class=overflow-x-auto>
+        <table class=w-full>
+            <thead class=bg-gray-50 border-b>
+                <tr>
+                    <th class=px-4 py-3 text-right text-sm font-bold text-gray-600>المستخدم</th>
+                    <th class=px-4 py-3 text-right text-sm font-bold text-gray-600>الراوتر</th>
+                    <th class=px-4 py-3 text-center text-sm font-bold text-gray-600>الحالة</th>
+                    <th class=px-4 py-3 text-center text-sm font-bold text-gray-600>الإجراءات</th>
+                </tr>
+            </thead>
+            <tbody class=divide-y>
+                @foreach($subscribers as $subscriber)
+                <tr class=hover:bg-gray-50>
+                    <td class=px-4 py-3>
+                        <div class=font-medium text-gray-800>{{ $subscriber->username }}</div>
+                        <div class=text-xs text-gray-500>{{ $subscriber->full_name ?? '' }}</div>
+                    </td>
+                    <td class=px-4 py-3 text-sm text-gray-600>{{ $subscriber->router->name ?? 'N/A' }}</td>
+                    <td class=px-4 py-3 text-center>
+                        @if($subscriber->status === 'active')
+                        <span class=px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs>نشط</span>
+                        @elseif($subscriber->status === 'expired')
+                        <span class=px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs>منتهي</span>
+                        @else
+                        <span class=px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs>{{ $subscriber->status }}</span>
+                        @endif
+                    </td>
+                    <td class=px-4 py-3 text-center>
+                        <button class=bg-blue-500 text-white px-3 py-1 rounded text-xs>تعديل</button>
+                    </td>
+                </tr>
+                @endforeach
+            </tbody>
+        </table>
+    </div>
+    @endif
+</div>
+
+<script>
+function syncAllRouters() {
+    alert('جاري المزامنة...');
+}
+</script>
+@endsection
