@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\RouterController;
+use App\Http\Controllers\ServerController;
 use App\Http\Controllers\SubscriberController;
 use App\Http\Controllers\ServicePlanController;
 use App\Http\Controllers\SessionController;
@@ -69,6 +70,12 @@ Route::middleware('auth')->group(function () {
     Route::get('/profile', [UserController::class, 'profile'])->name('profile');
     Route::put('/profile', [UserController::class, 'updateProfile'])->name('profile.update');
     
+    // Servers (SSH external access)
+    Route::resource('servers', ServerController::class);
+    Route::post('/servers/{server}/test', [ServerController::class, 'testConnection'])->name('servers.test');
+    Route::post('/servers/{server}/open-port', [ServerController::class, 'openPort'])->name('servers.open-port');
+    Route::get('/servers/{server}/check-port', [ServerController::class, 'checkPort'])->name('servers.check-port');
+
     // Routers
     Route::resource('routers', RouterController::class);
     Route::post('/routers/{router}/test', [RouterController::class, 'testConnection'])->name('routers.test');

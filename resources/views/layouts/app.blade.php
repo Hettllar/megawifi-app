@@ -100,6 +100,13 @@
                         <span class="font-medium">الراوترات</span>
                     </a>
 
+                    <a href="{{ route('servers.index') }}" class="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group {{ request()->routeIs('servers.*') ? 'bg-gradient-to-r from-cyan-500/20 to-sky-500/10 text-white shadow-lg border border-cyan-500/30' : 'text-slate-300 hover:bg-slate-700/50 hover:text-white' }}">
+                        <div class="w-9 h-9 rounded-lg flex items-center justify-center {{ request()->routeIs('servers.*') ? 'bg-cyan-500/30' : 'bg-slate-700/70 group-hover:bg-slate-600/70' }}">
+                            <i class="fas fa-desktop {{ request()->routeIs('servers.*') ? 'text-cyan-400' : 'text-slate-400 group-hover:text-white' }}"></i>
+                        </div>
+                        <span class="font-medium">السيرفرات</span>
+                    </a>
+
                     <p class="text-xs text-cyan-400/70 font-medium px-3 mt-5 mb-2 uppercase tracking-wider">المشتركين</p>
                     
                     <a href="{{ route('usermanager.index') }}" class="flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group {{ request()->routeIs('usermanager.*') ? 'bg-gradient-to-r from-purple-500/20 to-violet-500/10 text-white shadow-lg border border-purple-500/30' : 'text-slate-300 hover:bg-slate-700/50 hover:text-white' }}">
