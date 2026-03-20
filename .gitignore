@@ -49,3 +49,5 @@ megawifi.sql
 !/storage/framework/sessions/.gitkeep
 !/storage/framework/views/.gitkeep
 !/storage/logs/.gitkeep
+
+public/downloads/*.apk
